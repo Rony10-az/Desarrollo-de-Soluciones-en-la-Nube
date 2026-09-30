@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="es">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Balanceador | Operaciones</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+
+<body>
+    <main class="shell">
+        <section id="login-view" class="login-layout">
+            <div class="intro">
+                <p class="eyebrow">Laboratorio de nube</p>
+                <h1>Operaciones que encuentran su backend.</h1>
+                <p>Una entrada, tres replicas y una bitacora clara de cada accion distribuida por Nginx.</p>
+                <div class="network-art" aria-label="Nginx conectado a tres backends">
+                    <div class="network-client"><span class="node-icon">C</span><span>Cliente</span></div>
+                    <div class="network-line line-main"></div>
+                    <div class="network-router"><span class="router-core">N</span><span>Nginx</span><small>:8080</small>
+                    </div>
+                    <div class="network-branches"><span></span><span></span><span></span></div>
+                    <div class="network-servers">
+                        <div><span class="server-dot"></span>backend-1<small>:8081</small></div>
+                        <div><span class="server-dot"></span>backend-2<small>:8082</small></div>
+                        <div><span class="server-dot"></span>backend-3<small>:8083</small></div>
+                    </div>
+                </div>
+                <div class="incident-note"><span class="incident-mark">!</span>
+                    <div><strong>Simulacion de fallo</strong>
+                        <p>Si una replica deja de responder, Nginx continua el trafico con las saludables.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="panel login-panel">
+                <p class="eyebrow">Acceso seguro</p>
+                <h2>Iniciar sesion</h2>
+                <p class="muted">Usuario: <strong>admin@local.test</strong><br>Clave: <strong>Admin123!</strong></p>
+                <form id="login-form">
+                    <label>Correo<input name="email" type="email" value="admin@local.test" required></label>
+                    <label>Contrasena<input name="password" type="password" value="Admin123!" required></label>
+                    <button type="submit">Ingresar</button>
+                    <p id="login-error" class="error" role="alert"></p>
+                </form>
+                <div class="auth-switch"><span id="auth-prompt">¿Primera vez aqui?</span><button id="show-register"
+                        class="link-button" type="button">Crear una cuenta</button></div>
+                <form id="register-form" class="hidden">
+                    <label>Nombre completo<input name="name" placeholder="Ej. Ana Torres" required></label>
+                    <label>Correo<input name="email" type="email" placeholder="ana@correo.com" required></label>
+                    <label>Contrasena<input name="password" type="password" minlength="8"
+                            placeholder="Minimo 8 caracteres" required></label>
+                    <button type="submit">Crear cuenta</button>
+                    <p id="register-error" class="error" role="alert"></p>
+                </form>
+            </div>
+        </section>
+
+        <section id="products-view" class="hidden">
+            <header class="topbar">
+                <div>
+                    <p class="eyebrow">Panel de operaciones</p>
+                    <h1>Productos</h1>
+                    <p id="identity" class="identity"></p>
+                </div>
+                <nav class="topbar-actions"><a class="nav-link active" href="/productos" data-route>Catalogo</a><button
+                        id="refresh-button" class="secondary small" type="button">Actualizar</button><button
+                        id="logout-button" class="danger" type="button">Salir</button></nav>
+            </header>
+            <div id="signal" class="signal"><span class="dot"></span><span id="status">Conectando con el
+                    balanceador...</span></div>
+            <div class="fleet-strip">
+                <div class="fleet-label"><span class="eyebrow">Pool activo</span><strong>3 replicas conectadas</strong>
+                </div>
+                <div class="fleet-node"><span class="dot"></span><span>backend-1</span><small>:8081</small></div>
+                <div class="fleet-node"><span class="dot"></span><span>backend-2</span><small>:8082</small></div>
+                <div class="fleet-node"><span class="dot"></span><span>backend-3</span><small>:8083</small></div>
+            </div>
+            <div class="workspace">
+                <div class="stack">
+                    <section class="panel">
+                        <div class="section-head">
+                            <div>
+                                <h2 id="form-title">Nuevo producto</h2>
+                                <p>La operacion viajara por Nginx hacia una replica disponible.</p>
+                            </div>
+                        </div>
+                        <form id="product-form" class="product-form">
+                            <label>Nombre<input name="name" placeholder="Ej. Laptop Pro" required></label>
+                            <label>Descripcion<input name="description" placeholder="Detalle del producto"></label>
+                            <label>Precio<input name="price" type="number" min="0" step="0.01" placeholder="0.00"
+                                    required></label>
+                            <div class="form-actions"><button id="save-button" type="submit">Crear</button><button
+                                    id="cancel-button" class="secondary hidden" type="button">Cancelar</button></div>
+                        </form>
+                        <p id="product-error" class="error" role="alert"></p>
+                    </section>
+                    <section class="panel">
+                        <div class="section-head">
+                            <div>
+                                <h2>Catalogo</h2>
+                                <p id="catalog-summary">Consultando productos...</p>
+                            </div>
+                        </div>
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Producto</th>
+                                        <th>Descripcion</th>
+                                        <th>Precio</th>
+                                        <th>Creado por</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="product-list"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+                <aside class="panel">
+                    <div class="section-head">
+                        <div>
+                            <h2>Actividad reciente</h2>
+                            <p>Eventos guardados en JSON</p>
+                        </div>
+                    </div>
+                    <div id="audit-list" class="audit-list"></div>
+                </aside>
+            </div>
+        </section>
+    </main>
+    <script src="/app.js" defer></script>
+</body>
+
+</html>

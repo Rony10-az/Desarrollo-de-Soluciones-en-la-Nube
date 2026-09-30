@@ -1,0 +1,9 @@
+[
+  {
+    "id": 1,
+    "name": "Administrador",
+    "email": "admin@local.test",
+    "passwordHash": "$2a$10$b.POruZ7lKzvU0dVp7EkF.7T2kbOeCMRu6JsXFatVHSwOz3GA6p.y",
+    "createdAt": "2026-09-30T13:41:18.610Z"
+  }
+]

@@ -1,0 +1,19 @@
+{
+    "name": "monolito-balanceador",
+    "version": "1.0.0",
+    "private": true,
+    "description": "Monolito Node.js replicado y balanceado con Nginx",
+    "main": "src/server.js",
+    "scripts": {
+        "start": "node src/server.js",
+        "dev": "nodemon src/server.js"
+    },
+    "dependencies": {
+        "bcryptjs": "^2.4.3",
+        "express": "^4.21.2",
+        "jsonwebtoken": "^9.0.2"
+    },
+    "devDependencies": {
+        "nodemon": "^3.1.14"
+    }
+}

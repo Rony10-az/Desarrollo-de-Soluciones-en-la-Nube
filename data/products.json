@@ -1,0 +1,19 @@
+[
+  {
+    "id": 1,
+    "name": "Persistencia local",
+    "description": "Prueba visible en data/products.json",
+    "price": 50,
+    "createdBy": "admin@local.test",
+    "createdAt": "2026-09-30T14:53:59.548Z",
+    "updatedAt": "2026-09-30T15:02:36.422Z"
+  },
+  {
+    "id": 2,
+    "name": "SIN BACKEND2",
+    "description": "BACK",
+    "price": 1000,
+    "createdBy": "admin@local.test",
+    "createdAt": "2026-09-30T15:02:20.808Z"
+  }
+]

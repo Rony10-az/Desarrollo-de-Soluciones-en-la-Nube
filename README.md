@@ -1,6 +1,42 @@
-# Monolito Node.js con Nginx y Docker Compose
+# Monolito Node.js con balanceo de carga (Local + AWS)
 
-Implementacion local del laboratorio de balanceo de carga. La solucion usa un monolito Node.js replicado en tres contenedores, Nginx como punto de entrada Round Robin y archivos JSON compartidos para persistencia visible durante la practica.
+Laboratorio de balanceo de carga implementado en dos variantes sobre el mismo monolito Node.js:
+
+- **Parte A — Local:** 3 contenedores Docker replicados, balanceados con Nginx (Round Robin).
+- **Parte B — AWS:** 2 instancias EC2 con el mismo contenedor, balanceadas con un Application Load Balancer (ALB).
+
+## Índice
+
+- [Parte A — Local con Docker Compose y Nginx](#parte-a--local-con-docker-compose-y-nginx)
+  - [Arquitectura](#arquitectura)
+  - [Requisitos](#requisitos)
+  - [Arranque con Docker](#arranque-con-docker)
+  - [Puertos](#puertos)
+  - [Rutas de la interfaz](#rutas-de-la-interfaz)
+  - [API](#api)
+  - [Crear un usuario](#crear-un-usuario)
+  - [Probar login y CRUD](#probar-login-y-crud)
+  - [Evidenciar Round Robin](#evidenciar-round-robin)
+  - [Simular un fallo](#simular-un-fallo)
+  - [Persistencia JSON y auditoría](#persistencia-json-y-auditoría)
+  - [Ejecutar sin Docker](#ejecutar-sin-docker)
+  - [Detener la solución](#detener-la-solución)
+- [Parte B — Despliegue en AWS (Application Load Balancer)](#parte-b--despliegue-en-aws-application-load-balancer)
+  - [Arquitectura desplegada](#arquitectura-desplegada)
+  - [Recursos creados](#recursos-creados)
+  - [Publicar la imagen en Docker Hub](#publicar-la-imagen-en-docker-hub)
+  - [Probar el balanceo](#probar-el-balanceo)
+  - [Prueba de tolerancia a fallos](#prueba-de-tolerancia-a-fallos)
+  - [Evidencias para el entregable](#evidencias-para-el-entregable-capturas-a-incluir)
+  - [Problemas encontrados y solución](#problemas-encontrados-y-solución-bitácora)
+  - [Notas y limitaciones conocidas](#notas-y-limitaciones-conocidas)
+  - [Limpieza de recursos](#limpieza-de-recursos-aws)
+
+---
+
+# Parte A — Local con Docker Compose y Nginx
+
+Implementación local del laboratorio de balanceo de carga. La solución usa un monolito Node.js replicado en tres contenedores, Nginx como punto de entrada Round Robin y archivos JSON compartidos para persistencia visible durante la práctica.
 
 ## Arquitectura
 
@@ -259,3 +295,173 @@ docker compose down
 ```
 
 No usar `docker compose down -v` para limpiar los datos, porque la persistencia actual está en la carpeta local `data/`.
+
+---
+
+# Parte B — Despliegue en AWS (Application Load Balancer)
+
+Implementación en la nube del mismo monolito, usando 2 instancias EC2 detrás de un Application Load Balancer, siguiendo el diagrama de referencia del laboratorio.
+
+## Arquitectura desplegada
+
+```text
+Internet
+    |
+    v
+alb-lab-web (ALB, puerto 80)
+Security Group: Seguridad-alb (80 desde 0.0.0.0/0)
+    |
+    v  forward a tg-lab-web (HTTP:3000, health check /health)
+    |
+   / \
+  v   v
+web-server-1          web-server-2
+us-east-2a            us-east-2b
+t3.micro               t3.micro
+Docker: rony10az/monolito-balanceador:1.0
+Security Group: seguridad_web
+  - 3000 solo desde Seguridad-alb
+  - SSH 22 desde Mi IP (no usado; se accedió por Session Manager)
+```
+
+**VPC:** `laboratorio-vpc` (`10.0.0.0/16`), 2 subredes públicas en `us-east-2a` y `us-east-2b`, con Internet Gateway y tabla de rutas pública.
+
+**Imagen Docker:** [`rony10az/monolito-balanceador:1.0`](https://hub.docker.com/r/rony10az/monolito-balanceador), publicada en Docker Hub a partir del mismo `Dockerfile` usado en la Parte A.
+
+**Acceso administrativo a las instancias:** AWS Systems Manager Session Manager, con el rol IAM `ROL-SSM-EC2` (política `AmazonSSMManagedInstanceCore`) asignado a ambas EC2. Se usó en vez de SSH / EC2 Instance Connect porque la red local bloqueaba las conexiones salientes a los puertos 22 y 3000; Session Manager funciona sobre HTTPS (443).
+
+## Recursos creados
+
+| Recurso | Nombre | Detalle |
+|---|---|---|
+| VPC | `laboratorio-vpc` | CIDR `10.0.0.0/16`, 2 AZ (`us-east-2a`, `us-east-2b`) |
+| Security Group | `Seguridad-alb` | Entrada HTTP 80 desde `0.0.0.0/0` |
+| Security Group | `seguridad_web` | Entrada TCP 3000 desde `Seguridad-alb`; SSH 22 desde Mi IP |
+| Instancia EC2 | `web-server-1` | `t3.micro`, `us-east-2a`, contenedor Docker en :3000 |
+| Instancia EC2 | `web-server-2` | `t3.micro`, `us-east-2b`, contenedor Docker en :3000 |
+| Target Group | `tg-lab-web` | HTTP:3000, health check en `/health`, umbral 2/2, intervalo 30s |
+| Application Load Balancer | `alb-lab-web` | Internet-facing, listener HTTP:80 → `tg-lab-web` |
+| Rol IAM | `ROL-SSM-EC2` | Política `AmazonSSMManagedInstanceCore`, acceso vía Session Manager |
+
+## Publicar la imagen en Docker Hub
+
+Desde la carpeta `Particiones_Balanceador`, con Docker Desktop iniciado:
+
+```powershell
+docker login
+docker build -t rony10az/monolito-balanceador:1.0 .
+docker push rony10az/monolito-balanceador:1.0
+```
+
+> El nombre de usuario y del repositorio deben ir siempre en **minúsculas** (Docker Hub rechaza mayúsculas con el error `invalid reference format`).
+
+## Correr el contenedor dentro de cada instancia EC2
+
+Instaladas vía User Data (Amazon Linux 2023) o manualmente si el User Data falló:
+
+```bash
+sudo dnf install -y docker
+sudo systemctl enable --now docker
+
+sudo docker rm -f app 2>/dev/null
+sudo docker pull rony10az/monolito-balanceador:1.0
+sudo docker run -d --restart always --name app \
+  -p 3000:3000 \
+  -e PORT=3000 \
+  -e INSTANCE_NAME=web-server-1 \
+  -e JWT_SECRET=lab-balanceador-2026 \
+  rony10az/monolito-balanceador:1.0
+```
+
+En `web-server-2` se repite el mismo comando cambiando `INSTANCE_NAME=web-server-2`. **El `JWT_SECRET` debe ser idéntico en ambas instancias**, de lo contrario un token emitido por una no es válido en la otra.
+
+Verificación dentro de cada instancia:
+
+```bash
+sudo docker ps
+curl -v http://localhost:3000/health
+```
+
+## Probar el balanceo
+
+> Reemplaza la URL por el DNS real de tu ALB (**EC2 → Load Balancers → `alb-lab-web`**).
+
+```powershell
+curl http://alb-lab-web-850448343.us-east-2.elb.amazonaws.com/health
+```
+
+Respuesta esperada:
+
+```json
+{"status":"ok","message":"Backend disponible","backend":"web-server-1"}
+```
+
+Para evidenciar Round Robin entre las dos instancias:
+
+```powershell
+1..10 | % { curl -s http://alb-lab-web-850448343.us-east-2.elb.amazonaws.com/health }
+```
+
+Debe alternar entre `web-server-1` y `web-server-2`.
+
+Para ver la interfaz completa en el navegador, abrir directamente (sin `/health`):
+
+```text
+http://alb-lab-web-850448343.us-east-2.elb.amazonaws.com/
+```
+
+> El ALB solo tiene listener **HTTP** (puerto 80), sin certificado SSL. Si el navegador fuerza `https://` automáticamente (ver [Problemas encontrados](#problemas-encontrados-y-solución-bitácora)), la conexión da timeout.
+
+## Prueba de tolerancia a fallos
+
+1. Detener `web-server-1` desde la consola EC2 (**Instance state → Stop instance**).
+2. Esperar ~1 minuto y repetir el comando de balanceo: todas las respuestas deben venir de `web-server-2`.
+3. En el Target Group (`tg-lab-web` → Destinos), `web-server-1` debe figurar como `unhealthy`.
+4. Reiniciar `web-server-1` y confirmar que vuelve a `healthy` y el tráfico vuelve a alternar.
+
+## Evidencias para el entregable (capturas a incluir)
+
+Listado de capturas mínimas que respaldan cada parte del despliegue. Tomarlas **antes** de la limpieza de recursos, porque después ya no se pueden volver a generar.
+
+1. **VPC** — Mapa de recursos de `laboratorio-vpc` mostrando las 2 subredes, tabla de rutas e Internet Gateway.
+2. **Security Groups** — Reglas de entrada de `Seguridad-alb` (HTTP 80 público) y de `seguridad_web` (3000 solo desde `Seguridad-alb`, SSH desde Mi IP).
+3. **Instancias EC2** — Listado de `web-server-1` y `web-server-2` con estado "En ejecución", tipo `t3.micro`, IP pública y zona de disponibilidad.
+4. **Dentro de cada instancia** — Salida de `sudo docker ps` mostrando el contenedor `app` corriendo, y `curl -v http://localhost:3000/health` con respuesta `200 OK`.
+5. **Target Group** — Pestaña "Destinos" de `tg-lab-web` con ambas instancias en estado **`healthy`**.
+6. **Load Balancer** — Detalles de `alb-lab-web` con estado **Active**, DNS name visible, y el listener HTTP:80 → `tg-lab-web`.
+7. **Prueba de balanceo** — Terminal con la salida del comando `1..10 | % { curl -s http://DNS-DEL-ALB/health }` mostrando respuestas alternadas de `web-server-1` y `web-server-2`.
+8. **Navegador** — Captura de `http://DNS-DEL-ALB/` mostrando la pantalla de login servida desde AWS.
+9. **Prueba de tolerancia a fallos** — Tres capturas: (a) Target Group con `web-server-1` en `unhealthy` tras detenerla, (b) terminal mostrando que todas las respuestas vienen de `web-server-2`, (c) Target Group de vuelta con ambas en `healthy` tras reiniciar `web-server-1`.
+10. **Docker Hub** (opcional) — Página del repositorio `rony10az/monolito-balanceador` con el tag `1.0` publicado.
+
+## Problemas encontrados y solución (bitácora)
+
+Documentado como evidencia de troubleshooting real durante el despliegue — útil para justificar decisiones no contempladas en el lab original.
+
+| # | Problema | Causa | Solución |
+|---|---|---|---|
+| 1 | `EC2 Instance Connect`: *"Error establishing SSH connection"* | La regla de entrada SSH (22) en `seguridad_web` tenía una IP de origen desactualizada (IP pública dinámica del cliente). | Editar la regla y volver a seleccionar "Mi IP" para refrescar el valor. |
+| 2 | `curl` directo a `IP:3000/health` fallaba con timeout aun con el Security Group correcto | La red local (institucional) bloquea conexiones salientes a puertos no estándar como 22 y 3000. | Se descartó la prueba directa por IP/puerto 3000 y se validó todo a través del ALB en el puerto 80, que sí está permitido. |
+| 3 | Instancias lanzadas como `t8i.small` (fuera de Free Tier) | Tipo de instancia por defecto en el asistente de lanzamiento. | Detener la instancia → **Actions → Instance settings → Change instance type** → `t3.micro` → iniciar de nuevo. |
+| 4 | Al reiniciar tras el cambio de tipo, Status checks en `0/2` | Comportamiento normal tras un (re)inicio; toma 2-3 minutos en completarse. | Esperar y refrescar la consola. |
+| 5 | `docker push` fallaba con `invalid reference format: repository name must be lowercase` | Se usó un nombre de repositorio con mayúsculas. | Renombrar la imagen en minúsculas (`rony10az/monolito-balanceador:1.0`) y repetir `build`/`push`. |
+| 6 | Target Group mostraba ambas instancias `unhealthy`, ALB respondía `502 Bad Gateway` | El contenedor corría con una imagen construida antes de corregir el nombre del repositorio, o nunca llegó a descargarse. | Entrar a cada instancia y recrear el contenedor (`docker rm -f app` + `docker pull` + `docker run`) con la imagen correcta ya publicada en Docker Hub. |
+| 7 | `web-server-2` no aparecía en **Systems Manager → Fleet Manager** | El rol IAM `ROL-SSM-EC2` se asignó con la instancia ya en ejecución; el agente SSM no refrescó credenciales solo. | **Instance state → Reboot instance** para forzar al agente a releer el rol. |
+| 8 | Dentro de `web-server-2`, `docker: command not found` | El User Data de esa instancia no llegó a instalar Docker (fallo silencioso en el primer arranque). | Instalar manualmente: `sudo dnf install -y docker && sudo systemctl enable --now docker`. |
+| 9 | Navegador (Brave) con `ERR_CONNECTION_TIMED_OUT` al abrir el DNS del ALB, aunque `curl` por PowerShell sí funcionaba | El navegador forzaba `https://` automáticamente (HTTPS-upgrade), intentando el puerto 443, que no tiene listener ni regla abierta en el ALB. | Desactivar "Always use secure connections" en la configuración de privacidad del navegador, o escribir explícitamente `http://` y evitar la redirección automática. |
+
+## Notas y limitaciones conocidas
+
+- **Persistencia no compartida:** a diferencia de la Parte A (Docker Compose con volumen `./data` compartido), cada instancia EC2 tiene su propio disco. Un usuario o producto creado a través de `web-server-1` no aparece en `web-server-2`. Con Round Robin esto genera datos inconsistentes entre instancias — limitación esperada para este laboratorio; la solución real requeriría mover la persistencia a un almacenamiento compartido (RDS, DynamoDB o EFS), fuera del alcance de esta práctica.
+- **Sin HTTPS:** el ALB solo expone el listener HTTP:80. Agregar HTTPS requeriría un certificado en AWS Certificate Manager y un dominio propio, fuera del alcance de este lab.
+- **Acceso administrativo:** se usó Session Manager en vez de SSH porque la red local bloqueaba conexiones salientes a los puertos 22 y 3000 (típico en redes institucionales). Session Manager usa HTTPS (443) y no requiere abrir el puerto 22 a Internet.
+
+## Limpieza de recursos AWS
+
+Para evitar cobros, eliminar **en este orden**:
+
+1. Application Load Balancer (`alb-lab-web`).
+2. Target Group (`tg-lab-web`).
+3. Terminar las instancias EC2 (`web-server-1`, `web-server-2`).
+4. Rol IAM `ROL-SSM-EC2` (opcional, si no se reutiliza).
+5. VPC `laboratorio-vpc` (arrastra Internet Gateway, subredes y tablas de ruta).
